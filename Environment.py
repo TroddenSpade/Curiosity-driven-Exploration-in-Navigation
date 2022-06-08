@@ -15,7 +15,7 @@ class DroneEnv(gym.Env):
         self.observation_shape_scene = (144, 256, 3)
         self.observation_space = gym.spaces.Box(low=0, 
                                                 high=255,
-                                                shape=self.observation_shape_scene,
+                                                shape=self.observation_shape_depth,
                                                 dtype=np.uint8)
     
         self.action_space = gym.spaces.Box(low=-1.0, 
@@ -39,8 +39,9 @@ class DroneEnv(gym.Env):
         depth = np.array(depth * 255.0, dtype=np.uint8)
         if (len(depth) != (144*256)):
             print('The depth camera returned bad data.')
-            depth = np.ones(144*256)
-        depth = depth.reshape(responses[0].height, responses[0].width, 1)
+            depth = np.ones((144,256,1))
+        else:
+            depth = depth.reshape(responses[0].height, responses[0].width, 1)
         return depth
 
     
@@ -50,8 +51,9 @@ class DroneEnv(gym.Env):
         img = np.fromstring(response.image_data_uint8, dtype=np.uint8) 
         if (len(img) != (144*256*3)):
             print('The depth camera returned bad data.')
-            img = np.ones(144*256*3)
-        img = img.reshape(response.height, response.width, 3)
+            img = np.ones((144,256,3))
+        else:
+            img = img.reshape(response.height, response.width, 3)
         # img = np.flipud(img)
         return img
 
@@ -66,13 +68,13 @@ class DroneEnv(gym.Env):
 
         self.client.moveToPositionAsync(0, 0, -1, 1).join()
 
-        self.state = self.get_scene_img_()
+        self.state = self.get_depth_img_()
         return self.state
 
 
     def get_scale(self, pos):
         idx = np.argmin(np.square(self.coords - pos).sum(axis=1))
-        return (1 - idx/len(self.coords))
+        return idx/len(self.coords)
 
     
     def step(self, actions):
@@ -91,7 +93,7 @@ class DroneEnv(gym.Env):
         # self.client.moveByVelocityAsync(vel, 0, 0, 0.5).join()
         # time.sleep(0.1)
 
-        self.state = self.get_scene_img_()
+        self.state = self.get_depth_img_()
 
         # 'position': <Vector3r> {   
         #     'x_val': 2.1757102012634277,
@@ -101,14 +103,15 @@ class DroneEnv(gym.Env):
         position = drone_state.kinematics_estimated.position
         pos = np.array([position.x_val, position.y_val])
         scale = self.get_scale(pos)
+        print(scale)
 
         if self.client.simGetCollisionInfo().has_collided:
-            return self.state, -200 * scale, True, {}
+            return self.state, -10, True, {}
 
         self.client.moveToPositionAsync(position.x_val, position.y_val, -1, 1).join()
 
         if self.timesteps > self.TIMESTEP_LIMIT:
-            return self.state, -1 * scale, True, {'truncated':True}
+            return self.state, scale, True, {'truncated':True}
 
         if np.square(pos - self.target_pos).sum() < 1:
             return self.state, +100, True, {'x': position.x_val, 
@@ -116,7 +119,7 @@ class DroneEnv(gym.Env):
                                             'z': position.z_val}
 
         # return self.state, reward, False, {}
-        return self.state, -1 * scale, False, {'x': position.x_val, 
+        return self.state, scale, False, {'x': position.x_val, 
                                            'y': position.y_val, 
                                            'z': position.z_val}
         
