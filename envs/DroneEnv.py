@@ -8,14 +8,14 @@ import matplotlib.pyplot as plt
 
 
 class DroneEnv(gym.Env):
-    def __init__(self, env_path):
+    def __init__(self, env_path="envs/1.csv", sparse_reward=False):
         self.TIMESTEP_LIMIT = 100
         self.M = 4 # rows X
         self.N = 4 # cols Y
         self.WIDTH = 5
         self.LENGTH = 5
         self.TARGET_DIST = 2
-
+        self.sparse_reward = sparse_reward
         self.timesteps = 0
 
         self.observation_shape_depth = (144, 256, 1)
@@ -29,7 +29,6 @@ class DroneEnv(gym.Env):
                                            high=1.0, 
                                            shape=(2,), dtype=np.float32)
 
-        
         self.target_pos = np.array([0, 2])
         self.target_pos_ = np.array([self.target_pos[0] * self.LENGTH + self.LENGTH/2, 
                                      self.target_pos[1] * self.WIDTH + self.WIDTH/2])
@@ -152,7 +151,7 @@ class DroneEnv(gym.Env):
     def get_reward(self, pos):
         x = int(max((pos[0] + self.LENGTH/2) // self.LENGTH, 0))
         y = int(max((pos[1] + self.WIDTH/2) // self.WIDTH, 0))
-        return self.rewards_map[x, y]
+        return 1 - self.rewards_map[x, y]
 
     
     def step(self, actions):
@@ -177,23 +176,27 @@ class DroneEnv(gym.Env):
         drone_state = self.client.getMultirotorState()
         position = drone_state.kinematics_estimated.position
         pos = np.array([position.x_val, position.y_val])
-        reward = self.get_reward(pos)
+
+        if not self.sparse_reward:
+            reward = self.get_reward(pos)
+        else:
+            reward = 0
 
         if self.client.simGetCollisionInfo().has_collided:
             return self.state, -10, True, {}
 
         if self.timesteps > self.TIMESTEP_LIMIT:
-            return self.state, reward, True, {'truncated':True}
+            return self.state, -1 * reward, True, {'truncated':True}
 
         self.client.moveToPositionAsync(position.x_val, position.y_val, -1, 1).join()
 
         if np.square(pos - self.target).sum() < self.TARGET_DIST:
-            return self.state, self.TIMESTEP_LIMIT, True, {'x': position.x_val, 
+            return self.state, 100, True, {'x': position.x_val, 
                                                            'y': position.y_val, 
                                                            'z': position.z_val}
 
         # # return self.state, reward, False, {}
-        return self.state, reward, False, {'x': position.x_val, 
-                                           'y': position.y_val, 
-                                           'z': position.z_val}
+        return self.state, -1 * reward, False, {'x': position.x_val, 
+                                                'y': position.y_val, 
+                                                'z': position.z_val}
         
