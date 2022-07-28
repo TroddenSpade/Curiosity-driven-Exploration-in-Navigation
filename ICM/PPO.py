@@ -14,15 +14,21 @@ from torch.utils.tensorboard import SummaryWriter
 from ICM.ICM import ICM
 from nn.Actor import Actor
 from nn.Critic import Critic
+from nn.CNN import FeatureExtractor
 
 
 class PPO:
-    def __init__(self, Env, n_steps=256, n_epochs=5, batch_size=64, 
+    def __init__(self, env, n_steps=256, n_epochs=5, batch_size=64, 
                  lr=1e-3, gamma=0.99, tau=0.95, epsilon=1e-5,
                  vf_weight=0.5, ent_weight=0.01,
                  policy_clip=0.2, value_clip=None, grad_norm=0.5, 
+                 policy_kwargs=None, value_kwargs=None,
+                 icm_kwargs=None,
+                 feature_size=32,
+                 use_fe=True,
                  tensorboard_log=None, name="DRONE-PPO-ICM"):
         self.global_step = 0
+        self.global_episode = 0
         self.n_steps = n_steps
         self.n_epochs = n_epochs
         self.batch_size = batch_size
@@ -43,42 +49,37 @@ class PPO:
         else:
             self.writer = None
 
-        env = Env(sparse_reward=True)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         self.env = ch.envs.Torch(env)
         self.state = self.env.reset()
-        self.state = self.preprocess(self.state)
 
-        self.feature_extractor = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=(8, 8), stride=(4, 4)),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=(4, 4), stride=(2, 2)),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1)),
-            nn.ReLU(),
-            nn.Flatten(start_dim=1, end_dim=-1),
-            nn.Linear(in_features=25088, out_features=512, bias=True),
-            nn.ReLU(),
-        )
-        self.actor_head = Actor(env, 512, hidden_layers=(), activation=nn.ReLU)
-        self.critic_head = Critic(512, hidden_layers=(), activation=nn.ReLU)
-        self.icm = ICM(self.feature_extractor)
+        self.is_discrete = isinstance(self.env.action_space, gym.spaces.Discrete)
+        if self.is_discrete:
+            action_size = self.env.action_space.n
+        else:
+            action_size = self.env.action_space.shape[0]
+        state_size = self.env.observation_space.shape[0]
+        self.params = []
+        if use_fe:
+            self.feature_extractor = FeatureExtractor(output_size=feature_size)
+            self.params += list(self.feature_extractor.parameters())
+        else:
+            self.feature_extractor = nn.Identity()
+        self.actor_head = Actor(env, state_size, **policy_kwargs)
+        self.critic_head = Critic(state_size, **value_kwargs)
+        self.icm = ICM(self.is_discrete, 
+                       state_size=state_size,
+                       action_size=action_size,
+                       feature_size=feature_size, **icm_kwargs)
 
-        self.params = list(self.feature_extractor.parameters()) + \
-                 list(self.actor_head.parameters()) + \
-                 list(self.critic_head.parameters()) + \
-                 list(self.icm.inverse_model.parameters()) + \
-                 list(self.icm.forward_model.parameters())
+        self.params += list(self.actor_head.parameters()) + \
+                        list(self.critic_head.parameters()) + \
+                        list(self.icm.parameters())
         self.optimizer = torch.optim.Adam(self.params, lr=lr)
 
 
     def get_params(self):
         return self.params
-
-    def preprocess(self, state):
-        state = torch.unsqueeze(state, 0)
-        state = torch.permute(state, (0, 3, 1, 2))
-        return state
 
 
     def policy(self, state):
@@ -107,10 +108,13 @@ class PPO:
             with torch.no_grad():
                 mass = self.policy(self.state)
             action = mass.sample()
-            log_prob = mass.log_prob(action).mean(dim=1, keepdim=True)
+
+            if self.is_discrete:
+                log_prob = mass.log_prob(action)
+            else:
+                log_prob = mass.log_prob(action).mean(dim=1, keepdim=True)
 
             next_state, reward, done, _ = self.env.step(action)
-            next_state = self.preprocess(next_state)
 
             replay.append(self.state,
                         action,
@@ -120,8 +124,12 @@ class PPO:
                         log_prob=log_prob)
             
             if done:
+                if self.writer is not None:
+                    episode_reward, episode_length = self.env.episode()
+                    self.writer.add_scalar("episode_length", episode_length, self.global_episode)
+                    self.writer.add_scalar("episode_reward", episode_reward, self.global_episode)
                 self.state = self.env.reset()
-                self.state = self.preprocess(self.state)
+                self.global_episode += 1
             else:
                 self.state = next_state
 
@@ -165,30 +173,18 @@ class PPO:
                 start = self.batch_size * s_idx        
                 batch = ch.ExperienceReplay(replay[start: start + self.batch_size])
 
-                state_features = self.feature_extractor(batch.state())
-                state_p_features = self.feature_extractor(batch.next_state())
-
-                forward_input = torch.cat((state_features, batch.action()), dim=1)
-                pred_state_p_features = self.icm.forward_model(forward_input)
-                forward_loss = self.icm.forward_loss(pred_state_p_features, state_p_features)
-
-                inverse_input = torch.cat((state_features, state_p_features), dim=1)
-                pred_action = self.icm.inverse_model(inverse_input)
-                inverse_loss = self.icm.inverse_loss(pred_action, batch.action())
-
-                masses = self.actor_head(state_features)
-                new_values = self.critic_head(state_features)
+                masses, new_values = self.network(batch.state())
                 
                 actions = batch.action()
                 new_log_probs = masses.log_prob(actions).mean(dim=1, keepdim=True)
                 entropy = masses.entropy().mean()
-
                 advs = ch.normalize(batch.advantage(), epsilon=1e-8)
             
                 policy_loss = ppo.policy_loss(new_log_probs,
                                             batch.log_prob(),
                                             advs,
                                             clip=self.policy_clip)
+
                 if self.value_clip is not None:
                     value_loss = ppo.state_value_loss(new_values,
                                                     batch.value(),
@@ -200,7 +196,9 @@ class PPO:
             
                 ppo_loss = policy_loss - self.ent_weight * entropy + self.vf_weight * value_loss
 
+                forward_loss, inverse_loss = self.icm(batch.state(), batch.next_state(), actions)
                 loss = ppo_loss + forward_loss + inverse_loss
+
                 # Take optimization step
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -219,8 +217,9 @@ class PPO:
             self.writer.add_scalar("entropy", np.mean(entropies), self.global_step)
             self.writer.add_scalar("forward_loss", np.mean(inverse_losses), self.global_step)
             self.writer.add_scalar("inverse_loss", np.mean(forward_losses), self.global_step)
+            self.writer.add_scalar("rewards_mean", rewards.mean().item(), self.global_step)
 
-        return rewards.mean()
+        return rewards.sum()
 
 
     def train(self, total_timesteps):
