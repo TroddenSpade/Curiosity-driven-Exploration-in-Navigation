@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import cherry as ch
 import numpy as np
-
+import gym
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
@@ -14,8 +14,12 @@ class Actor(nn.Module):
     def __init__(self, env, input_size, hidden_layers=(64, 64), 
                  activation=nn.ReLU, optimizer=torch.optim.Adam, **kwargs):
         super().__init__()
+        is_discrete = isinstance(env.action_space, gym.spaces.Discrete)
+        if is_discrete:
+            self.actor_output_size = env.action_space.n
+        else:
+            self.actor_output_size = env.action_space.shape[0]
         self.input_size = input_size
-        self.actor_output_size = env.action_space.shape[0]
 
         layers = []
         last = self.input_size
