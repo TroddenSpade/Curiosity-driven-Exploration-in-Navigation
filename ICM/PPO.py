@@ -1,3 +1,4 @@
+import os
 import random
 import gym
 import time
@@ -26,7 +27,11 @@ class PPO:
                  icm_kwargs=None,
                  feature_size=32,
                  use_fe=True,
-                 tensorboard_log=None, name="DRONE-PPO-ICM"):
+                 tensorboard_log=None,
+                 name="DRONE-PPO-ICM",
+                 save_path='./models/',
+                 save_every=8,
+                 auto_load=True):
         self.global_step = 0
         self.global_episode = 0
         self.n_steps = n_steps
@@ -42,12 +47,21 @@ class PPO:
         self.value_clip = value_clip
         self.grad_norm = grad_norm
         self.tensorboard_log = tensorboard_log
+        self.save_path = save_path
+        self.use_fe = use_fe
+        self.feature_size = feature_size
+        self.policy_kwargs = policy_kwargs
+        self.value_kwargs = value_kwargs
+        self.icm_kwargs = icm_kwargs
+        self.name = name
 
-        if tensorboard_log is not None:
-            run_name = name + "_" + str(int(time.time()))
-            self.writer = SummaryWriter(f"{tensorboard_log}/{run_name}")
+        self.save_every = save_every
+        self.n_updates = 0
+
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
         else:
-            self.writer = None
+            self.device = torch.device("cpu")
 
         env = gym.wrappers.RecordEpisodeStatistics(env)
         self.env = ch.envs.Torch(env)
@@ -61,21 +75,120 @@ class PPO:
         state_size = self.env.observation_space.shape[0]
         self.params = []
         if use_fe:
-            self.feature_extractor = FeatureExtractor(output_size=feature_size)
+            self.feature_extractor = FeatureExtractor(output_size=feature_size).to(self.device)
             self.params += list(self.feature_extractor.parameters())
         else:
             self.feature_extractor = nn.Identity()
-        self.actor_head = Actor(env, state_size, **policy_kwargs)
-        self.critic_head = Critic(state_size, **value_kwargs)
+        self.actor_head = Actor(env, feature_size, **policy_kwargs).to(self.device)
+        self.critic_head = Critic(feature_size, **value_kwargs).to(self.device)
         self.icm = ICM(self.is_discrete, 
                        state_size=state_size,
                        action_size=action_size,
-                       feature_size=feature_size, **icm_kwargs)
+                       feature_size=feature_size, **icm_kwargs).to(self.device)
 
         self.params += list(self.actor_head.parameters()) + \
                         list(self.critic_head.parameters()) + \
                         list(self.icm.parameters())
         self.optimizer = torch.optim.Adam(self.params, lr=lr)
+
+        if auto_load:
+            self.load()
+        else:
+            if tensorboard_log is not None:
+                self.run_name = name + "_" + str(int(time.time()))
+                self.writer = SummaryWriter(f"{tensorboard_log}/{self.run_name}")
+            else:
+                self.writer = None
+
+
+    def save(self):
+        name = "M-" + str(self.global_step)
+        path = os.path.join(self.save_path, name)
+
+        os.makedirs(path, exist_ok=True) 
+
+        dic = {}
+        dic['global_step'] = self.global_step
+        dic['global_episode'] = self.global_episode
+        dic['n_steps'] = self.n_steps
+        dic['n_epochs'] = self.n_epochs
+        dic['batch_size'] = self.batch_size
+        dic['lr'] = self.lr
+        dic['gamma'] = self.gamma
+        dic['tau'] = self.tau
+        dic['epsilon'] = self.epsilon
+        dic['vf_weight'] = self.vf_weight
+        dic['ent_weight'] = self.ent_weight
+        dic['policy_clip'] = self.policy_clip
+        dic['value_clip'] = self.value_clip
+        dic['grad_norm'] = self.grad_norm
+        dic['tensorboard_log'] = self.tensorboard_log
+        dic['save_path'] = self.save_path
+        dic["device"] = self.device
+        dic["run_name"] = self.run_name
+        dic["feature_size"] = self.feature_size
+        dic['use_fe'] = self.use_fe
+        torch.save(dic, f"{path}/D.pt")
+
+        if self.use_fe:
+            torch.save(self.feature_extractor.state_dict(), path + "/FE.pt")
+        torch.save(self.actor_head.state_dict(), path + "/AH.pt")
+        torch.save(self.critic_head.state_dict(), path + "/CH.pt")
+        torch.save(self.icm.state_dict(), path + "/ICM.pt")
+
+        
+    def load(self):
+        arr = sorted(os.scandir(self.save_path), key=lambda e: e.name)
+        if len(arr) == 0:
+            if self.tensorboard_log is not None:
+                self.run_name = self.name + "_" + str(int(time.time()))
+                self.writer = SummaryWriter(f"{self.tensorboard_log}/{self.run_name}")
+            else:
+                self.writer = None
+            return
+        path = arr[-1].path
+
+        dic = torch.load(path + "/D.pt")
+        self.global_step = dic['global_step']
+        self.global_episode = dic['global_episode']
+        self.n_steps = dic['n_steps']
+        self.n_epochs = dic['n_epochs']
+        self.batch_size = dic['batch_size']
+        self.lr = dic['lr']
+        self.gamma = dic['gamma']
+        self.tau = dic['tau']
+        self.epsilon = dic['epsilon']
+        self.vf_weight = dic['vf_weight']
+        self.ent_weight = dic['ent_weight']
+        self.policy_clip = dic['policy_clip']
+        self.value_clip = dic['value_clip']
+        self.grad_norm = dic['grad_norm']
+        self.tensorboard_log = dic['tensorboard_log']
+        self.save_path = dic['save_path']
+        self.device = dic['device']
+        self.run_name = dic['run_name']
+        self.feature_size = dic['feature_size']
+        self.use_fe = dic['use_fe']
+
+        if self.use_fe:
+            self.feature_extractor.load_state_dict(torch.load(path + "/FE.pt"))
+            self.feature_extractor.to(self.device)
+        self.actor_head.load_state_dict(torch.load(path + "/AH.pt"))
+        self.actor_head.to(self.device)
+        self.critic_head.load_state_dict(torch.load(path + "/CH.pt"))
+        self.critic_head.to(self.device)
+        self.icm.load_state_dict(torch.load(path + "/ICM.pt"))
+        self.icm.to(self.device)
+
+        self.params += list(self.actor_head.parameters()) + \
+                        list(self.critic_head.parameters()) + \
+                        list(self.icm.parameters())
+        self.optimizer = torch.optim.Adam(self.params, lr=self.lr)
+
+        if self.tensorboard_log is not None:
+            self.writer = SummaryWriter(f"{self.tensorboard_log}/{self.run_name}")
+        else:
+            self.writer = None
 
 
     def get_params(self):
@@ -98,7 +211,7 @@ class PPO:
 
     
     def collect_steps(self, n_steps):
-        replay = ch.ExperienceReplay()
+        replay = ch.ExperienceReplay(device=self.device)
         steps = 0
 
         while steps < n_steps:
@@ -137,6 +250,7 @@ class PPO:
 
 
     def update(self, replay):
+        self.n_updates += 1
         # Logging
         policy_losses = []
         value_losses = []
@@ -219,6 +333,9 @@ class PPO:
             self.writer.add_scalar("inverse_loss", np.mean(forward_losses), self.global_step)
             self.writer.add_scalar("rewards_mean", rewards.mean().item(), self.global_step)
 
+        if self.n_updates % self.save_every == 0:
+            print("Saving...")
+            self.save()
         return rewards.sum()
 
 
