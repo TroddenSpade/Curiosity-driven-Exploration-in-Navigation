@@ -32,7 +32,7 @@ class ICM(nn.Module):
         self.is_discrete = is_discrete
 
         if use_fe:
-            self.feature_extractor = FeatureExtractor(state_size, feature_size)
+            self.feature_extractor = FeatureExtractor(feature_size)
         else:
             self.feature_extractor  = nn.Identity()
 
