@@ -36,7 +36,7 @@ class DroneEnv(gym.Env):
                                 self.target_pos[1] * self.LENGTH])
 
         self.process_map(env_path)
-        self.draw_map()
+        # self.draw_map()
 
         self.client = airsim.MultirotorClient()
         self.client.confirmConnection()
