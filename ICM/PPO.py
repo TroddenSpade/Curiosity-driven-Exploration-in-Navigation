@@ -62,6 +62,7 @@ class PPO:
             self.device = torch.device("cuda")
         else:
             self.device = torch.device("cpu")
+        print(f"Using device: {self.device}")
 
         env = gym.wrappers.RecordEpisodeStatistics(env)
         self.env = ch.envs.Torch(env)
@@ -147,6 +148,7 @@ class PPO:
                 self.writer = None
             return
         path = arr[-1].path
+        print("Loading model from: ", path)
 
         dic = torch.load(path + "/D.pt")
         self.global_step = dic['global_step']
@@ -169,10 +171,12 @@ class PPO:
         self.run_name = dic['run_name']
         self.feature_size = dic['feature_size']
         self.use_fe = dic['use_fe']
+        self.params = []
 
         if self.use_fe:
             self.feature_extractor.load_state_dict(torch.load(path + "/FE.pt"))
             self.feature_extractor.to(self.device)
+            self.params += list(self.feature_extractor.parameters())
         self.actor_head.load_state_dict(torch.load(path + "/AH.pt"))
         self.actor_head.to(self.device)
         self.critic_head.load_state_dict(torch.load(path + "/CH.pt"))
