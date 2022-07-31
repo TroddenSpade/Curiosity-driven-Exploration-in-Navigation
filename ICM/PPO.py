@@ -200,16 +200,19 @@ class PPO:
 
 
     def policy(self, state):
+        state = state.to(self.device)
         x = self.feature_extractor(state)
         return self.actor_head(x)
 
 
     def baseline(self, state):
+        state = state.to(self.device)
         x = self.feature_extractor(state)
         return self.critic_head(x)
 
 
     def network(self, state):
+        state = state.to(self.device)
         x = self.feature_extractor(state)
         return self.actor_head(x), self.critic_head(x)
 
