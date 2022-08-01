@@ -139,7 +139,7 @@ class PPO:
 
         
     def load(self):
-        arr = sorted(os.scandir(self.save_path), key=lambda e: e.name)
+        arr = sorted(os.scandir(self.save_path), key=os.path.getmtime)
         if len(arr) == 0:
             if self.tensorboard_log is not None:
                 self.run_name = self.name + "_" + str(int(time.time()))
