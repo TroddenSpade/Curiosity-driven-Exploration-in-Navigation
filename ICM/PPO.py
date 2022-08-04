@@ -30,7 +30,7 @@ class PPO:
                  tensorboard_log=None,
                  name="DRONE-PPO-ICM",
                  save_path='./models/',
-                 save_every=8,
+                 save_every=None,
                  auto_load=True):
         self.global_step = 0
         self.global_episode = 0
@@ -78,10 +78,14 @@ class PPO:
         if use_fe:
             self.feature_extractor = FeatureExtractor(output_size=feature_size).to(self.device)
             self.params += list(self.feature_extractor.parameters())
+
+            self.actor_head = Actor(env, feature_size, **policy_kwargs).to(self.device)
+            self.critic_head = Critic(feature_size, **value_kwargs).to(self.device)
         else:
             self.feature_extractor = nn.Identity()
-        self.actor_head = Actor(env, feature_size, **policy_kwargs).to(self.device)
-        self.critic_head = Critic(feature_size, **value_kwargs).to(self.device)
+            self.actor_head = Actor(env, state_size, **policy_kwargs).to(self.device)
+            self.critic_head = Critic(state_size, **value_kwargs).to(self.device)
+
         self.icm = ICM(self.is_discrete, 
                        state_size=state_size,
                        action_size=action_size,
@@ -340,7 +344,7 @@ class PPO:
             self.writer.add_scalar("inverse_loss", np.mean(forward_losses), self.global_step)
             self.writer.add_scalar("rewards_mean", rewards.mean().item(), self.global_step)
 
-        if self.n_updates % self.save_every == 0:
+        if self.save_every and self.n_updates % self.save_every == 0:
             print("Saving...")
             self.save()
         return rewards.sum()
