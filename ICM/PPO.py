@@ -29,7 +29,7 @@ class PPO:
                  use_fe=True,
                  tensorboard_log=None,
                  name="DRONE-PPO-ICM",
-                 save_path='./models/',
+                 save_path='./models/PPO/',
                  save_every=None,
                  auto_load=True):
         self.global_step = 0
@@ -340,8 +340,8 @@ class PPO:
             self.writer.add_scalar("policy_loss", np.mean(policy_losses), self.global_step)
             self.writer.add_scalar("value_loss", np.mean(value_losses), self.global_step)
             self.writer.add_scalar("entropy", np.mean(entropies), self.global_step)
-            self.writer.add_scalar("forward_loss", np.mean(inverse_losses), self.global_step)
-            self.writer.add_scalar("inverse_loss", np.mean(forward_losses), self.global_step)
+            self.writer.add_scalar("forward_loss", np.mean(forward_losses), self.global_step)
+            self.writer.add_scalar("inverse_loss", np.mean(inverse_losses), self.global_step)
             self.writer.add_scalar("rewards_mean", rewards.mean().item(), self.global_step)
 
         if self.save_every and self.n_updates % self.save_every == 0:
