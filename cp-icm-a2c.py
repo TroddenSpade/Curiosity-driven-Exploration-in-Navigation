@@ -20,12 +20,14 @@ icm_kwargs = {
     "activation_fn": nn.ReLU
 }
 
-agent = ICM.PPO(env, n_steps=256, 
+agent = ICM.A2C(env, n_steps=5, 
                 policy_kwargs=policy_kwargs, 
                 value_kwargs=value_kwargs, 
                 icm_kwargs=icm_kwargs,
                 use_fe=False,
-                name="CARTPOLE-PPO-ICM",
-                feature_size=32, tensorboard_log="./logs/")
+                feature_size=32, 
+                auto_load=False,
+                name="CARTPOLEv1-A2C-ICM",
+                tensorboard_log="./logs/")
 
 agent.train(total_timesteps=100_000)

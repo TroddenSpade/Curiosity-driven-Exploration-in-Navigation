@@ -22,6 +22,6 @@ agent = PPO.PPO(env, n_steps=256,
                 feature_size=32, 
                 save_every=None,
                 tensorboard_log="./logs/",
-                auto_load=True)
+                auto_load=False)
 
 agent.train(total_timesteps=100_000)
