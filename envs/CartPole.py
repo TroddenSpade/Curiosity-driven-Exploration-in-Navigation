@@ -1,11 +1,12 @@
 import gym
 
 class CartPole(gym.Env):
-    def __init__(self):
+    def __init__(self, sparse_reward=True):
         self.env = gym.make("CartPole-v1")
         self.steps = 0
         self.MAX_STEPS = 500
-
+        self.sparse_reward = sparse_reward
+        
         self.action_space = self.env.action_space
         self.observation_space = self.env.observation_space
 
@@ -31,6 +32,8 @@ class CartPole(gym.Env):
                 extrinsic_reward = -100
             else:
                 extrinsic_reward = 100
+        if not self.sparse_reward:
+            extrinsic_reward = rew
         return state, extrinsic_reward, done, info
 
 
