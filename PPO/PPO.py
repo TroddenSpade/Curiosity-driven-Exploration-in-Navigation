@@ -27,8 +27,8 @@ class PPO:
                  feature_size=32,
                  use_fe=True,
                  tensorboard_log=None,
-                 name="DRONE-PPO-ICM",
-                 save_path='./models/',
+                 name="PPO",
+                 save_path='./models/PPO/',
                  save_every=8,
                  auto_load=True):
         self.global_step = 0
