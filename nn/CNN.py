@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 ''' Learning by Prediction ICLR 2017 paper
     (their final output was 64 changed to 256 here)
-    input: [None, 120, 160, 1]; output: [None, 1280] -> [None, 256];
+    input: [None, 144, 256, 1]; output: [None, 1344] -> [None, 256];
 '''
 class FeatureExtractor(nn.Module):
     def __init__(self, output_size=256):
