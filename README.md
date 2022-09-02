@@ -9,7 +9,7 @@
 
 ## Environments
 This repository includes the following environments, each of them is composed of `Sparse` and `Dense` reward modes.
-- Cartpole-v2
+- CartPole-v1
 - Montezuma Revenge
 - UE4 Airsim Maze Environment 
   - This environment was derived form [`frasergeorgeking/UE4_BP_MazeGen_MIT`](https://github.com/frasergeorgeking/UE4_BP_MazeGen_MIT) which is a free and open source maze generator with various themes for Unreal Engine. The `Airsim Drone` package was attached to it and it is available for modification and download in [`TroddenSpade/UE4-Airsim-Maze-Environment`](https://github.com/TroddenSpade/UE4-Airsim-Maze-Environment)
@@ -27,6 +27,9 @@ This repository includes the following environments, each of them is composed of
   - [ ] Never Give Up (NGU)
   
 ## Experiments
+
+### CartPole-v1
+<img src="https://github.com/TroddenSpade/Curiosity-driven-Exploration-in-Drone-Navigation/blob/main/assets/cartpole_plot.png?raw=true" width="800px">
 
 
 ## References
