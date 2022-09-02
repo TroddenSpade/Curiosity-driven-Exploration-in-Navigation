@@ -20,6 +20,7 @@ from nn.CNN import FeatureExtractor
 class A2C:
     def __init__(self, env, n_steps=5, batch_size=64, 
                  lr=1e-3, gamma=0.99, tau=0.95, epsilon=1e-5,
+                 alpha=1, beta=0.2,
                  vf_weight=0.5, ent_weight=0.01, grad_norm=0.5, 
                  policy_kwargs=None, value_kwargs=None,
                  icm_kwargs=None,
@@ -37,6 +38,8 @@ class A2C:
         self.lr = lr
         self.gamma = gamma
         self.tau = tau
+        self.alpha = alpha
+        self.beta = beta
         self.epsilon = epsilon
         self.vf_weight = vf_weight
         self.ent_weight = ent_weight
@@ -115,6 +118,8 @@ class A2C:
         dic['lr'] = self.lr
         dic['gamma'] = self.gamma
         dic['tau'] = self.tau
+        dic['alpha'] = self.alpha
+        dic['beta'] = self.beta
         dic['epsilon'] = self.epsilon
         dic['vf_weight'] = self.vf_weight
         dic['ent_weight'] = self.ent_weight
@@ -154,6 +159,8 @@ class A2C:
         self.lr = dic['lr']
         self.gamma = dic['gamma']
         self.tau = dic['tau']
+        self.alpha = dic['alpha']
+        self.beta = dic['beta']
         self.epsilon = dic['epsilon']
         self.vf_weight = dic['vf_weight']
         self.ent_weight = dic['ent_weight']
@@ -239,11 +246,12 @@ class A2C:
             
             if done:
                 if self.writer is not None:
-                    episode_reward, episode_length = self.env.episode()
+                    episode_length, episode_reward = self.env.episode()
                     self.writer.add_scalar("episode_length", episode_length, self.global_episode)
                     self.writer.add_scalar("episode_reward", episode_reward, self.global_episode)
                 self.state = self.env.reset()
                 self.global_episode += 1
+                print(episode_reward)
             else:
                 self.state = next_state
 
@@ -274,7 +282,7 @@ class A2C:
         a2c_loss = policy_loss - self.ent_weight * entropy + self.vf_weight * value_loss
 
         forward_loss, inverse_loss = self.icm(replay.state(), replay.next_state(), replay.action())
-        loss = a2c_loss + forward_loss + inverse_loss
+        loss = self.alpha * a2c_loss + self.beta * forward_loss + (1 - self.beta) * inverse_loss
 
         # Take optimization step
         self.optimizer.zero_grad()
