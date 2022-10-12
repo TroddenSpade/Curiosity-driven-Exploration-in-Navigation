@@ -67,11 +67,11 @@ class PPO:
             self.device = torch.device("cpu")
         print(f"Using device: {self.device}")
 
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        self.env = ch.envs.Torch(env)
+        self.env = env
         self.state = self.env.reset()
 
         self.is_discrete = isinstance(self.env.action_space, gym.spaces.Discrete)
+        self.cnn = len(self.env.observation_space.shape) > 1
         if self.is_discrete:
             action_size = self.env.action_space.n
         else:
@@ -90,6 +90,7 @@ class PPO:
             self.critic_head = Critic(state_size, **value_kwargs).to(self.device)
 
         self.icm = ICM(self.is_discrete, 
+                       cnn=self.cnn,
                        state_size=state_size,
                        action_size=action_size,
                        feature_size=feature_size, **icm_kwargs).to(self.device)
@@ -245,7 +246,7 @@ class PPO:
             else:
                 log_prob = mass.log_prob(action).mean(dim=1, keepdim=True)
 
-            next_state, reward, done, _ = self.env.step(action)
+            next_state, reward, done, info = self.env.step(action)
 
             replay.append(self.state,
                         action,
@@ -255,13 +256,13 @@ class PPO:
                         log_prob=log_prob)
             
             if done:
-                if self.writer is not None:
-                    episode_length, episode_reward = self.env.episode()
-                    self.writer.add_scalar("episode_length", episode_length, self.global_episode)
-                    self.writer.add_scalar("episode_reward", episode_reward, self.global_episode)
-                self.state = self.env.reset()
                 self.global_episode += 1
-                print(episode_reward)
+                if self.writer is not None:
+                    dic = info["episode"]
+                    for key, val in dic.items():
+                        self.writer.add_scalar(f"episode/{key}", val, self.global_episode)
+                print(f"Ep:{self.global_episode} | {info}")
+                self.state = self.env.reset()
             else:
                 self.state = next_state
 
@@ -277,10 +278,16 @@ class PPO:
         inverse_losses = []
         forward_losses = []
 
+        states = replay.state()
+        next_states = replay.next_state()
+        if states.dim() == 3:
+            states = states.unsqueeze(1)
+            next_states = next_states.unsqueeze(1)
+
         with torch.no_grad():
             next_state_value = self.baseline(replay[-1].next_state)
-            values = self.baseline(replay.state())
-            intrinsic_reward = self.icm.intrinsic_reward(replay.state(), replay.next_state(), replay.action())
+            values = self.baseline(states)
+            intrinsic_reward = self.icm.intrinsic_reward(states, next_states, replay.action())
 
         rewards = replay.reward() + intrinsic_reward
         advantages = ch.generalized_advantage(self.gamma,
@@ -306,7 +313,13 @@ class PPO:
                 start = self.batch_size * s_idx        
                 batch = ch.ExperienceReplay(replay[start: start + self.batch_size])
 
-                masses, new_values = self.network(batch.state())
+                states = batch.state()
+                next_states = batch.next_state()
+                if states.dim() == 3:
+                    states = states.unsqueeze(1)
+                    next_states = next_states.unsqueeze(1)
+
+                masses, new_values = self.network(states)
                 
                 actions = batch.action()
                 new_log_probs = masses.log_prob(actions).mean(dim=1, keepdim=True)
@@ -329,7 +342,7 @@ class PPO:
             
                 ppo_loss = policy_loss - self.ent_weight * entropy + self.vf_weight * value_loss
 
-                forward_loss, inverse_loss = self.icm(batch.state(), batch.next_state(), actions)
+                forward_loss, inverse_loss = self.icm(states, next_states, actions)
                 loss = self.alpha * ppo_loss + self.beta * forward_loss + (1 - self.beta) * inverse_loss
 
                 # Take optimization step
@@ -345,12 +358,12 @@ class PPO:
                 forward_losses.append(forward_loss.item())
 
         if self.writer is not None:
-            self.writer.add_scalar("policy_loss", np.mean(policy_losses), self.global_step)
-            self.writer.add_scalar("value_loss", np.mean(value_losses), self.global_step)
-            self.writer.add_scalar("entropy", np.mean(entropies), self.global_step)
-            self.writer.add_scalar("forward_loss", np.mean(forward_losses), self.global_step)
-            self.writer.add_scalar("inverse_loss", np.mean(inverse_losses), self.global_step)
-            self.writer.add_scalar("rewards_mean", rewards.mean().item(), self.global_step)
+            self.writer.add_scalar("ppo/policy_loss", np.mean(policy_losses), self.global_step)
+            self.writer.add_scalar("ppo/value_loss", np.mean(value_losses), self.global_step)
+            self.writer.add_scalar("ppo/entropy", np.mean(entropies), self.global_step)
+            self.writer.add_scalar("icm/forward_loss", np.mean(forward_losses), self.global_step)
+            self.writer.add_scalar("icm/inverse_loss", np.mean(inverse_losses), self.global_step)
+            self.writer.add_scalar("ppo/rewards_mean", rewards.mean().item(), self.global_step)
 
         if self.save_every and self.n_updates % self.save_every == 0:
             print("Saving...")
