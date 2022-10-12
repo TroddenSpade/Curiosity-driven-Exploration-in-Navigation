@@ -62,8 +62,7 @@ class A2C:
             self.device = torch.device("cpu")
         print(f"Using device: {self.device}")
 
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        self.env = ch.envs.Torch(env)
+        self.env = env
         self.state = self.env.reset()
 
         self.is_discrete = isinstance(self.env.action_space, gym.spaces.Discrete)
@@ -234,7 +233,7 @@ class A2C:
             else:
                 log_prob = mass.log_prob(action).mean(dim=1, keepdim=True)
 
-            next_state, reward, done, _ = self.env.step(action)
+            next_state, reward, done, info = self.env.step(action)
 
             replay.append(self.state,
                         action,
@@ -245,13 +244,13 @@ class A2C:
                         log_prob=log_prob)
             
             if done:
-                if self.writer is not None:
-                    episode_length, episode_reward = self.env.episode()
-                    self.writer.add_scalar("episode_length", episode_length, self.global_episode)
-                    self.writer.add_scalar("episode_reward", episode_reward, self.global_episode)
-                self.state = self.env.reset()
                 self.global_episode += 1
-                print(episode_reward)
+                if self.writer is not None:
+                    dic = info["episode"]
+                    for key, val in dic.items():
+                        self.writer.add_scalar(f"episode/{key}", val, self.global_episode)
+                print(f"Ep:{self.global_episode} | {info}")
+                self.state = self.env.reset()
             else:
                 self.state = next_state
 
@@ -261,10 +260,16 @@ class A2C:
     def update(self, replay):
         self.n_updates += 1
 
-        values = self.baseline(replay.state())
+        states = replay.state()
+        next_states = replay.next_state()
+        if states.dim() == 3:
+            states = states.unsqueeze(1)
+            next_states = next_states.unsqueeze(1)
+
+        values = self.baseline(states)
         with torch.no_grad():
             next_state_value = self.baseline(replay[-1].next_state)
-            intrinsic_reward = self.icm.intrinsic_reward(replay.state(), replay.next_state(), replay.action())
+            intrinsic_reward = self.icm.intrinsic_reward(states, next_states, replay.action())
 
         rewards = replay.reward() + intrinsic_reward
         advantages = ch.generalized_advantage(self.gamma,
@@ -281,7 +286,7 @@ class A2C:
             
         a2c_loss = policy_loss - self.ent_weight * entropy + self.vf_weight * value_loss
 
-        forward_loss, inverse_loss = self.icm(replay.state(), replay.next_state(), replay.action())
+        forward_loss, inverse_loss = self.icm(states, next_states, replay.action())
         loss = self.alpha * a2c_loss + self.beta * forward_loss + (1 - self.beta) * inverse_loss
 
         # Take optimization step
