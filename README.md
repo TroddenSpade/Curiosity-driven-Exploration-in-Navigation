@@ -30,6 +30,8 @@ This repository includes the following environments, each of them is composed of
 ## Experiments
 
 ### CartPole-v1
+The CartPole Environments has been modified, and its time-based reward is supplanted by a sparse reward system that only returns the last reward of each episode.
+
 <img src="https://github.com/TroddenSpade/Curiosity-driven-Exploration-in-Drone-Navigation/blob/main/assets/cartpole_plot.png?raw=true" width="800px">
 
 ### Montezuma Revenge
@@ -49,6 +51,16 @@ This map is a large circular environment. Player is spawned in the exact center.
 
 #### Deadly Corridor
 This map is a corridor with shooting monsters on both sides (6 monsters in total). A green vest is placed at the oposite end of the corridor. Reward is proportional (negative or positive) to change of the distance between the player and the vest. If player ignores monsters on the sides and runs straight for the vest he will be killed somewhere along the way.
+
+### UE4 Airsim Maze
+The goal is to explore through a labyrinth and find the terminal square. Along the way, the agent should avoid colliding with walls; otherwise, the environment will reset the episode, and a -1 reward will be given.
+
+
+
+https://user-images.githubusercontent.com/33734646/195972907-6d2bdf32-d8e0-4f2a-8671-46692c8aebea.mp4
+
+
+https://user-images.githubusercontent.com/33734646/195972854-26f9ee94-12cd-42db-ac48-d62060d48329.mp4
 
 
 ## References
