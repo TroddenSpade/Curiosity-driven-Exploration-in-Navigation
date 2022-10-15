@@ -5,7 +5,6 @@ import time
 
 import numpy as np
 import cherry as ch
-import cherry.algorithms.ppo as ppo
 import cherry.algorithms.a2c as a2c
 
 import torch
@@ -18,32 +17,32 @@ from nn.Critic import Critic
 from nn.CNN import FeatureExtractor
 
 
-class PPO:
-    def __init__(self, env, n_steps=256, n_epochs=5, batch_size=64, 
+class A2C:
+    def __init__(self, env, n_steps=5, batch_size=64, 
                  lr=1e-3, gamma=0.99, tau=0.95, epsilon=1e-5,
-                 vf_weight=0.5, ent_weight=0.01,
-                 policy_clip=0.2, value_clip=None, grad_norm=0.5, 
+                 alpha=1, beta=0.2,
+                 vf_weight=0.5, ent_weight=0.01, grad_norm=0.5, 
                  policy_kwargs=None, value_kwargs=None,
+                 icm_kwargs=None,
                  feature_size=32,
                  use_fe=True,
                  tensorboard_log=None,
-                 name="PPO",
-                 save_path='./models/PPO/',
-                 save_every=8,
+                 name="DRONE-A2C-ICM",
+                 save_path='./models/A2C/',
+                 save_every=None,
                  auto_load=True):
         self.global_step = 0
         self.global_episode = 0
         self.n_steps = n_steps
-        self.n_epochs = n_epochs
         self.batch_size = batch_size
         self.lr = lr
         self.gamma = gamma
         self.tau = tau
+        self.alpha = alpha
+        self.beta = beta
         self.epsilon = epsilon
         self.vf_weight = vf_weight
         self.ent_weight = ent_weight
-        self.policy_clip = policy_clip
-        self.value_clip = value_clip
         self.grad_norm = grad_norm
         self.tensorboard_log = tensorboard_log
         self.save_path = save_path
@@ -51,6 +50,7 @@ class PPO:
         self.feature_size = feature_size
         self.policy_kwargs = policy_kwargs
         self.value_kwargs = value_kwargs
+        self.icm_kwargs = icm_kwargs
         self.name = name
 
         self.save_every = save_every
@@ -62,8 +62,7 @@ class PPO:
             self.device = torch.device("cpu")
         print(f"Using device: {self.device}")
 
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        self.env = ch.envs.Torch(env)
+        self.env = env
         self.state = self.env.reset()
 
         self.is_discrete = isinstance(self.env.action_space, gym.spaces.Discrete)
@@ -84,9 +83,14 @@ class PPO:
             self.actor_head = Actor(env, state_size, **policy_kwargs).to(self.device)
             self.critic_head = Critic(state_size, **value_kwargs).to(self.device)
 
+        self.icm = ICM(self.is_discrete, 
+                       state_size=state_size,
+                       action_size=action_size,
+                       feature_size=feature_size, **icm_kwargs).to(self.device)
 
         self.params += list(self.actor_head.parameters()) + \
-                        list(self.critic_head.parameters())
+                        list(self.critic_head.parameters()) + \
+                        list(self.icm.parameters())
         self.optimizer = torch.optim.Adam(self.params, lr=lr)
 
         if auto_load:
@@ -109,16 +113,15 @@ class PPO:
         dic['global_step'] = self.global_step
         dic['global_episode'] = self.global_episode
         dic['n_steps'] = self.n_steps
-        dic['n_epochs'] = self.n_epochs
         dic['batch_size'] = self.batch_size
         dic['lr'] = self.lr
         dic['gamma'] = self.gamma
         dic['tau'] = self.tau
+        dic['alpha'] = self.alpha
+        dic['beta'] = self.beta
         dic['epsilon'] = self.epsilon
         dic['vf_weight'] = self.vf_weight
         dic['ent_weight'] = self.ent_weight
-        dic['policy_clip'] = self.policy_clip
-        dic['value_clip'] = self.value_clip
         dic['grad_norm'] = self.grad_norm
         dic['tensorboard_log'] = self.tensorboard_log
         dic['save_path'] = self.save_path
@@ -132,6 +135,7 @@ class PPO:
             torch.save(self.feature_extractor.state_dict(), path + "/FE.pt")
         torch.save(self.actor_head.state_dict(), path + "/AH.pt")
         torch.save(self.critic_head.state_dict(), path + "/CH.pt")
+        torch.save(self.icm.state_dict(), path + "/ICM.pt")
 
         
     def load(self):
@@ -150,16 +154,15 @@ class PPO:
         self.global_step = dic['global_step']
         self.global_episode = dic['global_episode']
         self.n_steps = dic['n_steps']
-        self.n_epochs = dic['n_epochs']
         self.batch_size = dic['batch_size']
         self.lr = dic['lr']
         self.gamma = dic['gamma']
         self.tau = dic['tau']
+        self.alpha = dic['alpha']
+        self.beta = dic['beta']
         self.epsilon = dic['epsilon']
         self.vf_weight = dic['vf_weight']
         self.ent_weight = dic['ent_weight']
-        self.policy_clip = dic['policy_clip']
-        self.value_clip = dic['value_clip']
         self.grad_norm = dic['grad_norm']
         self.tensorboard_log = dic['tensorboard_log']
         self.save_path = dic['save_path']
@@ -177,9 +180,12 @@ class PPO:
         self.actor_head.to(self.device)
         self.critic_head.load_state_dict(torch.load(path + "/CH.pt"))
         self.critic_head.to(self.device)
+        self.icm.load_state_dict(torch.load(path + "/ICM.pt"))
+        self.icm.to(self.device)
 
         self.params += list(self.actor_head.parameters()) + \
-                        list(self.critic_head.parameters())
+                        list(self.critic_head.parameters()) + \
+                        list(self.icm.parameters())
         self.optimizer = torch.optim.Adam(self.params, lr=self.lr)
 
         if self.tensorboard_log is not None:
@@ -218,31 +224,33 @@ class PPO:
             steps += 1
             self.global_step += 1
 
-            with torch.no_grad():
-                mass = self.policy(self.state)
+            mass = self.policy(self.state)
             action = mass.sample()
+            entropy = mass.entropy()
 
             if self.is_discrete:
                 log_prob = mass.log_prob(action)
             else:
                 log_prob = mass.log_prob(action).mean(dim=1, keepdim=True)
 
-            next_state, reward, done, _ = self.env.step(action)
+            next_state, reward, done, info = self.env.step(action)
 
             replay.append(self.state,
                         action,
                         reward,
                         next_state,
                         done,
+                        entropy=entropy,
                         log_prob=log_prob)
             
             if done:
-                if self.writer is not None:
-                    episode_reward, episode_length = self.env.episode()
-                    self.writer.add_scalar("episode_length", episode_length, self.global_episode)
-                    self.writer.add_scalar("episode_reward", episode_reward, self.global_episode)
-                self.state = self.env.reset()
                 self.global_episode += 1
+                if self.writer is not None:
+                    dic = info["episode"]
+                    for key, val in dic.items():
+                        self.writer.add_scalar(f"episode/{key}", val, self.global_episode)
+                print(f"Ep:{self.global_episode} | {info}")
+                self.state = self.env.reset()
             else:
                 self.state = next_state
 
@@ -251,76 +259,48 @@ class PPO:
 
     def update(self, replay):
         self.n_updates += 1
-        # Logging
-        policy_losses = []
-        value_losses = []
-        entropies = []
 
+        states = replay.state()
+        next_states = replay.next_state()
+        if states.dim() == 3:
+            states = states.unsqueeze(1)
+            next_states = next_states.unsqueeze(1)
+
+        values = self.baseline(states)
         with torch.no_grad():
             next_state_value = self.baseline(replay[-1].next_state)
-            values = self.baseline(replay.state())
+            intrinsic_reward = self.icm.intrinsic_reward(states, next_states, replay.action())
 
-        rewards = replay.reward()
+        rewards = replay.reward() + intrinsic_reward
         advantages = ch.generalized_advantage(self.gamma,
                                                 self.tau,
                                                 rewards,
                                                 replay.done(),
-                                                values,
+                                                values.detach(),
                                                 next_state_value)
-        returns = advantages + values
+        returns = advantages + values.detach()
 
-        for i, sars in enumerate(replay):
-            sars.returns = returns[i]
-            sars.advantage = advantages[i]
-
-        l = len(replay._storage)
-        n_batches = l // self.batch_size
-
-        # Perform some optimization steps
-        for _ in range(self.n_epochs):
-            random.shuffle(replay._storage)
-
-            for s_idx in range(n_batches):
-                start = self.batch_size * s_idx        
-                batch = ch.ExperienceReplay(replay[start: start + self.batch_size])
-
-                masses, new_values = self.network(batch.state())
-                
-                actions = batch.action()
-                new_log_probs = masses.log_prob(actions).mean(dim=1, keepdim=True)
-                entropy = masses.entropy().mean()
-                advs = ch.normalize(batch.advantage(), epsilon=1e-8)
+        entropy = replay.entropy().mean()
+        policy_loss = a2c.policy_loss(replay.log_prob(), advantages)
+        value_loss = a2c.state_value_loss(values, returns)
             
-                policy_loss = ppo.policy_loss(new_log_probs,
-                                            batch.log_prob(),
-                                            advs,
-                                            clip=self.policy_clip)
+        a2c_loss = policy_loss - self.ent_weight * entropy + self.vf_weight * value_loss
 
-                if self.value_clip is not None:
-                    value_loss = ppo.state_value_loss(new_values,
-                                                    batch.value(),
-                                                    batch.returns(),
-                                                    clip=self.value_clip)
-                else:
-                    value_loss = a2c.state_value_loss(new_values,
-                                                    batch.returns())
-            
-                loss = policy_loss - self.ent_weight * entropy + self.vf_weight * value_loss
+        forward_loss, inverse_loss = self.icm(states, next_states, replay.action())
+        loss = self.alpha * a2c_loss + self.beta * forward_loss + (1 - self.beta) * inverse_loss
 
-                # Take optimization step
-                self.optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.params, self.grad_norm)
-                self.optimizer.step()
-
-                policy_losses.append(policy_loss.item())
-                value_losses.append(value_loss.item())
-                entropies.append(entropy.item())
+        # Take optimization step
+        self.optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.params, self.grad_norm)
+        self.optimizer.step()
 
         if self.writer is not None:
-            self.writer.add_scalar("policy_loss", np.mean(policy_losses), self.global_step)
-            self.writer.add_scalar("value_loss", np.mean(value_losses), self.global_step)
-            self.writer.add_scalar("entropy", np.mean(entropies), self.global_step)
+            self.writer.add_scalar("policy_loss", policy_loss.item(), self.global_step)
+            self.writer.add_scalar("value_loss", value_loss.item(), self.global_step)
+            self.writer.add_scalar("entropy", entropy.item(), self.global_step)
+            self.writer.add_scalar("forward_loss", forward_loss.item(), self.global_step)
+            self.writer.add_scalar("inverse_loss", inverse_loss.item(), self.global_step)
             self.writer.add_scalar("rewards_mean", rewards.mean().item(), self.global_step)
 
         if self.save_every and self.n_updates % self.save_every == 0:

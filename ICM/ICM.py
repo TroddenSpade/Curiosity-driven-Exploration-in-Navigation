@@ -19,6 +19,7 @@ class DiscreteFE(nn.Module):
 
 class ICM(nn.Module):
     def __init__(self, is_discrete=False, 
+                 cnn=True,
                  feature_size=32, 
                  state_size=4, action_size=2, 
                  inverse_hidden_layer=(32,), 
@@ -30,14 +31,17 @@ class ICM(nn.Module):
         self.alpha = alpha
         self.beta = beta
         self.is_discrete = is_discrete
+        self.cnn = cnn
 
         if use_fe:
-            self.feature_extractor = FeatureExtractor(feature_size)
+            if self.cnn:
+                self.feature_extractor = FeatureExtractor(feature_size)
+            else:
+                self.feature_extractor = DiscreteFE(state_size, feature_size)
         else:
             self.feature_extractor  = nn.Identity()
 
         if is_discrete:
-            self.feature_extractor = DiscreteFE(state_size, feature_size)
             self.eyes = torch.eye(action_size)
 
         layers = []
