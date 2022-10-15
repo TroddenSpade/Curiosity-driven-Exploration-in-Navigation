@@ -55,13 +55,17 @@ This map is a corridor with shooting monsters on both sides (6 monsters in total
 ### UE4 Airsim Maze
 The goal is to explore through a labyrinth and find the terminal square. Along the way, the agent should avoid colliding with walls; otherwise, the environment will reset the episode, and a -1 reward will be given.
 
-
-
 https://user-images.githubusercontent.com/33734646/195972907-6d2bdf32-d8e0-4f2a-8671-46692c8aebea.mp4
 
+https://user-images.githubusercontent.com/33734646/195974030-4aae21cd-0f74-4e12-bf58-2c927de4388d.mp4
 
-https://user-images.githubusercontent.com/33734646/195972854-26f9ee94-12cd-42db-ac48-d62060d48329.mp4
+![drone-len](https://user-images.githubusercontent.com/33734646/195973768-9583412f-4ccd-4e2e-a3cc-c2a2af821524.PNG)
 
+![drone-rew](https://user-images.githubusercontent.com/33734646/195973772-649d0ef6-37cc-43a9-82df-13776b449653.PNG)
+
+![drone-ppo](https://user-images.githubusercontent.com/33734646/195973779-5f8082de-82d8-4db0-a091-b7b8fe352cf3.PNG)
+
+![drone-icm](https://user-images.githubusercontent.com/33734646/195973781-8069acf1-8c01-4591-947c-1aac3a0f178e.PNG)
 
 ## References
 
