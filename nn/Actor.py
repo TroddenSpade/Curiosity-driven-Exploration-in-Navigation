@@ -12,7 +12,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 class Actor(nn.Module):
     def __init__(self, env, input_size, hidden_layers=(64, 64), 
-                 activation=nn.ReLU, optimizer=torch.optim.Adam, **kwargs):
+                 activation=nn.ELU, optimizer=torch.optim.Adam, **kwargs):
         super().__init__()
         is_discrete = isinstance(env.action_space, gym.spaces.Discrete)
         if is_discrete:
