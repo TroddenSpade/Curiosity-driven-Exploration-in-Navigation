@@ -4,3 +4,5 @@ from .resizeobservation import ResizeObservation
 from .greyscaleobservation import GreyScaleObservation
 from .lazyframestoarray import LazyFramesToArray
 from .TorchEnv import TorchEnv
+from .ObservationWrapper import ObservationWrapper
+from .VizDoomWrapper import VizDoomWrapper
