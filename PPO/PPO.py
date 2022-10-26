@@ -62,8 +62,7 @@ class PPO:
             self.device = torch.device("cpu")
         print(f"Using device: {self.device}")
 
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        self.env = ch.envs.Torch(env)
+        self.env = env
         self.state = self.env.reset()
 
         self.is_discrete = isinstance(self.env.action_space, gym.spaces.Discrete)
@@ -227,7 +226,7 @@ class PPO:
             else:
                 log_prob = mass.log_prob(action).mean(dim=1, keepdim=True)
 
-            next_state, reward, done, _ = self.env.step(action)
+            next_state, reward, done, info = self.env.step(action)
 
             replay.append(self.state,
                         action,
@@ -237,12 +236,13 @@ class PPO:
                         log_prob=log_prob)
             
             if done:
-                if self.writer is not None:
-                    episode_reward, episode_length = self.env.episode()
-                    self.writer.add_scalar("episode_length", episode_length, self.global_episode)
-                    self.writer.add_scalar("episode_reward", episode_reward, self.global_episode)
-                self.state = self.env.reset()
                 self.global_episode += 1
+                if self.writer is not None:
+                    dic = info["episode"]
+                    for key, val in dic.items():
+                        self.writer.add_scalar(f"episode/{key}", val, self.global_episode)
+                print(f"Ep:{self.global_episode} | {info}")
+                self.state = self.env.reset()
             else:
                 self.state = next_state
 
@@ -318,10 +318,10 @@ class PPO:
                 entropies.append(entropy.item())
 
         if self.writer is not None:
-            self.writer.add_scalar("policy_loss", np.mean(policy_losses), self.global_step)
-            self.writer.add_scalar("value_loss", np.mean(value_losses), self.global_step)
-            self.writer.add_scalar("entropy", np.mean(entropies), self.global_step)
-            self.writer.add_scalar("rewards_mean", rewards.mean().item(), self.global_step)
+            self.writer.add_scalar("ppo/policy_loss", np.mean(policy_losses), self.global_step)
+            self.writer.add_scalar("ppo/value_loss", np.mean(value_losses), self.global_step)
+            self.writer.add_scalar("ppo/entropy", np.mean(entropies), self.global_step)
+            self.writer.add_scalar("ppo/rewards_mean", rewards.mean().item(), self.global_step)
 
         if self.save_every and self.n_updates % self.save_every == 0:
             print("Saving...")
